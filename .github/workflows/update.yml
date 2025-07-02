@@ -1,0 +1,81 @@
+name: Update
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: default
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.BACKEND_REPO }}
+          token: ${{ secrets.BACKEND_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Checkout current repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          path: ./__repo_temp__
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Download release assets
+        env:
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ vars.RELEASE_TAG }}/output.json
+        run: |
+          wget -O output.json "$RELEASE_URL"
+
+      - name: Run script
+        run: |
+          python sync.py || echo 'Ignored errors in config synchronization'
+          python update.py
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          overwrite_files: true
+          tag_name: ${{ vars.RELEASE_TAG }}
+          fail_on_unmatched_files: true
+          files: |
+            output.json
+
+      - name: Generate timestamp
+        run: |
+          echo $(date +"%Y-%m-%d %H:%M:%S") > ./__repo_temp__/timestamp
+
+      - name: Push to current repo
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Automated Commit
+          commit_options: '--no-verify --signoff --amend'
+          repository: ./__repo_temp__
+          add_options: '-A'
+          push_options: '--force'
+          skip_dirty_check: true
+          skip_fetch: true
+          skip_checkout: true
